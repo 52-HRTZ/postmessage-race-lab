@@ -1,0 +1,12 @@
+{
+  "name": "postmessage-race-condition-lab",
+  "version": "1.0.0",
+  "description": "A self-contained lab demonstrating a client-side race condition (TOCTOU) in a postMessage handler that leaks a first-party OAuth token.",
+  "scripts": {
+    "provider": "node provider/server.js",
+    "attacker": "node attacker/server.js"
+  },
+  "keywords": ["security", "postMessage", "race-condition", "toctou", "oauth", "bug-bounty", "web-security", "lab"],
+  "license": "MIT",
+  "private": true
+}

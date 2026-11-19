@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Example Identity Provider (VULNERABLE)</title>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 20px; color: #1a1a1a; }
+  h1 { font-size: 17px; }
+  .pill { background:#ffe3e3; color:#c92a2a; border-radius:999px; padding:2px 10px; font-size:12px; }
+  #log { background:#0b0b0d; color:#7CFC98; font-family: ui-monospace, monospace; font-size: 12px;
+         padding: 10px; border-radius: 8px; height: 230px; overflow:auto; white-space: pre-wrap; margin-top:12px; }
+</style>
+</head>
+<body>
+  <h1>🔐 Example Identity Provider <span class="pill">VULNERABLE</span></h1>
+  <div>Allowed origin: <b>http://localhost:5000</b>. Returns <code>{ token, state }</code> to the
+  destination origin <code>k</code>, which it validates with a real async round-trip.</div>
+  <div id="log"></div>
+
+<script>
+// =============================================================================
+//  VULNERABLE provider — client-side race condition on the destination origin
+// =============================================================================
+//  Messages:
+//    { type:"getToken", appOrigin, state } -> validate appOrigin (async), send token to k
+//    { type:"register", appOrigin }        -> set destination k (any time, no check)
+//
+//  k is the shared, mutable destination. getToken validates it with a REAL async
+//  request and RE-READS it when sending. A register that lands during the gap
+//  changes k, so the token is sent to a different origin than the one validated.
+//
+const USER_TOKEN = "fp_at_" + Math.random().toString(36).slice(2, 10);  // a fake access token
+let k = location.origin;                    // destination origin (shared + mutable)
+
+function log(m){ const e=document.getElementById("log"); e.textContent+=m+"\n"; e.scrollTop=e.scrollHeight; }
+
+if (window.opener) window.opener.postMessage(JSON.stringify({ type:"provider_ready" }), "*");
+log("ready. allowed origin = http://localhost:5000");
+
+window.addEventListener("message", async (event) => {
+  let m; try { m = JSON.parse(event.data); } catch { return; }
+  if (!m) return;
+
+  if (m.type === "register") {
+    k = m.appOrigin;                        // overwrite destination, no validation
+    log("register  -> k = " + k);
+    return;
+  }
+
+  if (m.type === "getToken") {
+    k = m.appOrigin;                        // destination taken from the request
+    const checking = k;
+    log("getToken   appOrigin = " + checking + "  — validating (real round-trip)…");
+    // GENUINE async gap: a real HTTP request (not an injected setTimeout).
+    const allowed = await fetch("/api/authorize?origin=" + encodeURIComponent(checking))
+                            .then(r => r.json()).then(j => j.allowed).catch(() => false);
+    if (!allowed) { log("  ✗ " + checking + " is NOT allowed — no token sent"); return; }
+    // re-read k: a register during the await may have changed it.
+    const payload = JSON.stringify({ token: USER_TOKEN, state: m.state || null });
+    if (window.opener) window.opener.postMessage(payload, k);   // targetOrigin = current k
+    log("  ✓ validated " + checking + ", token sent with targetOrigin = " + k);
+  }
+}, false);
+</script>
+</body>
+</html>

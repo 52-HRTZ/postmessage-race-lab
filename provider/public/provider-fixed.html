@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Example Identity Provider (FIXED)</title>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 20px; color: #1a1a1a; }
+  h1 { font-size: 17px; }
+  .pill { background:#e3fce8; color:#2b8a3e; border-radius:999px; padding:2px 10px; font-size:12px; }
+  #log { background:#0b0b0d; color:#7CFC98; font-family: ui-monospace, monospace; font-size: 12px;
+         padding: 10px; border-radius: 8px; height: 220px; overflow:auto; white-space: pre-wrap; margin-top:12px; }
+</style>
+</head>
+<body>
+  <h1>🔐 Example Identity Provider <span class="pill">FIXED</span></h1>
+  <div>Same popup flow, patched handler. Run the exact same exploit and it never leaks.</div>
+  <div id="log"></div>
+
+<script>
+// =============================================================================
+//  FIXED popup provider
+// =============================================================================
+//  - Trust event.origin (browser-set, unforgeable), never a payload field.
+//  - Capture it in a per-handler local const (no shared mutable destination).
+//  - Decide synchronously against an allowlist; use the captured origin to send.
+//
+const USER_TOKEN = "FIRST_PARTY_ACCESS_TOKEN_s3cr3t";
+const ALLOW = new Set(["http://localhost:5000"]);
+
+function log(m){ const e=document.getElementById("log"); e.textContent+=m+"\n"; e.scrollTop=e.scrollHeight; }
+
+if (window.opener) window.opener.postMessage(JSON.stringify({ type:"provider_ready" }), "*");
+log("fixed provider ready");
+
+window.addEventListener("message", (event) => {
+  const origin = event.origin;             // unforgeable, per-handler local
+  let m; try { m = JSON.parse(event.data); } catch { return; }
+  if (!m || m.type !== "getToken") return;
+
+  if (!ALLOW.has(origin)) { log("✗ rejected origin " + origin); return; }
+  if (window.opener) window.opener.postMessage(JSON.stringify({ token: USER_TOKEN }), origin);
+  log("✓ allowlisted, token sent to " + origin);
+}, false);
+</script>
+</body>
+</html>
